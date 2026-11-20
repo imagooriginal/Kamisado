@@ -28,4 +28,13 @@ public class Square {
     public void setOccupied(boolean occupied) {
         isOccupied = occupied;
     }
+
+    public void setPiece(Piece piece) {
+        this.piece = piece;
+        this.isOccupied = (piece != null);
+    }
+
+    public Piece getPiece() {
+        return piece;
+    }
 }
