@@ -6,25 +6,68 @@ import java.util.List;
 public class Game {
     private Player currentPlayer;
     private Color nextMoveColor;
-    private Boolean firstMove = true;
+    private boolean firstMove = true;
     private Player lastMovedPlayer;
+    private boolean gameOver = false;
+    private Player winner = null;
+    private final boolean simulation;
 
     public Game() {
-        // Board board = new Board();
         currentPlayer = Player.PLAYER1;
         nextMoveColor = null; // No color restriction for the first move
+        firstMove = true;
         lastMovedPlayer = null;
+        gameOver = false;
+        winner = null;
+        simulation = false;
         Player.PLAYER1.setWinner(false);
         Player.PLAYER2.setWinner(false);
+    }
 
+    /** Creates a simulation copy of {@code other} without mutating global {@link Player} winner flags. */
+    public Game(Game other) {
+        this.currentPlayer = other.currentPlayer;
+        this.nextMoveColor = other.nextMoveColor;
+        this.firstMove = other.firstMove;
+        this.lastMovedPlayer = other.lastMovedPlayer;
+        this.gameOver = other.gameOver;
+        this.winner = other.winner;
+        this.simulation = true;
     }
 
     public void move(Board board, Player player, Square fromSquare, Square toSquare) {
+        validateMove(board, player, fromSquare, toSquare);
+
+        Piece movedPiece = fromSquare.getPiece();
+        toSquare.setPiece(movedPiece);
+        fromSquare.setPiece(null);
+        movedPiece.setSquare(toSquare);
+
+        firstMove = false;
+        lastMovedPlayer = player;
+        if (hasReachedGoal(player, toSquare)) {
+            endGame(player);
+            return;
+        }
+        nextMoveColor = getNextMoveColor(board, toSquare.getColor());
+    }
+
+    /**
+     * Validates game state, turn order, piece ownership, color restriction,
+     * direction, and clear path.
+     */
+    private void validateMove(Board board, Player player, Square fromSquare, Square toSquare) {
+        if (gameOver) {
+            throw new IllegalStateException("The game is already over!");
+        }
         if (player != currentPlayer) {
             throw new IllegalArgumentException("It's not your turn!");
         }
         if (!fromSquare.isOccupied()) {
             throw new IllegalArgumentException("There is no piece to move!");
+        }
+        if (fromSquare.getPiece().getPlayer() != player) {
+            throw new IllegalArgumentException("You can only move your own piece!");
         }
         if (toSquare.isOccupied()) {
             throw new IllegalArgumentException("The destination square is already occupied!");
@@ -38,31 +81,32 @@ public class Game {
         if (!isValidMove(board, fromSquare, toSquare)) {
             throw new IllegalArgumentException("Invalid move!");
         }
-
-        fromSquare.setOccupied(false);
-        toSquare.setOccupied(true);
-        toSquare.setPiece(fromSquare.getPiece());
-        fromSquare.setPiece(null);
-        toSquare.getPiece().setSquare(toSquare);
-
-        firstMove = false;
-        lastMovedPlayer = player;
-        if (hasReachedGoal(player, toSquare)) {
-            player.setWinner(true);
-            throw new IllegalArgumentException("VÉGE A JÁTÉKNAK!");
-        }
-        nextMoveColor = getNextMoveColor(board, toSquare.getColor());
-
     }
 
-    /** Checks whether {@code toSquare} advances strictly forward in {@code player}'s direction. */
+    /** Marks the game finished and records {@code winningPlayer} as the winner. */
+    private void endGame(Player winningPlayer) {
+        this.gameOver = true;
+        this.winner = winningPlayer;
+        this.nextMoveColor = null;
+        if (!simulation && winningPlayer != null) {
+            winningPlayer.setWinner(true);
+        }
+    }
+
+    /**
+     * Checks whether {@code toSquare} advances strictly forward along the vertical
+     * y-axis.
+     */
     private boolean isForwardMove(Player player, Square fromSquare, Square toSquare) {
         int fromY = fromSquare.getCoordinates().getY();
         int toY = toSquare.getCoordinates().getY();
         return (player == Player.PLAYER1) ? (toY > fromY) : (toY < fromY);
     }
 
-    /** Checks whether {@code player} has reached the opponent's home row. */
+    /**
+     * Checks whether {@code player} has reached the opponent's home row (y == 7 for
+     * PLAYER1, y == 0 for PLAYER2).
+     */
     private boolean hasReachedGoal(Player player, Square toSquare) {
         int targetY = toSquare.getCoordinates().getY();
         return (player == Player.PLAYER1 && targetY == 7)
@@ -70,13 +114,52 @@ public class Game {
     }
 
     public boolean isValidMove(Board board, Square fromSquare, Square toSquare) {
-        if (!isStraightOrDiagonal(fromSquare, toSquare)) {
+        if (!fromSquare.isOccupied()
+                || !isForwardMove(fromSquare.getPiece().getPlayer(), fromSquare, toSquare)
+                || !isStraightOrDiagonal(fromSquare, toSquare)) {
             return false;
         }
         int stepX = calculateStep(fromSquare.getCoordinates().getX(), toSquare.getCoordinates().getX());
         int stepY = calculateStep(fromSquare.getCoordinates().getY(), toSquare.getCoordinates().getY());
 
         return isPathClear(board.getGrid(), fromSquare, toSquare, stepX, stepY);
+    }
+
+    /**
+     * Returns all legal destination squares for the piece standing on
+     * {@code fromSquare}.
+     */
+    public List<Square> getValidMoves(Board board, Square fromSquare) {
+        List<Square> validMoves = new ArrayList<>();
+        if (gameOver || !fromSquare.isOccupied()) {
+            return validMoves;
+        }
+        Piece piece = fromSquare.getPiece();
+        if (piece.getPlayer() != currentPlayer || (!firstMove && piece.getColor() != nextMoveColor)) {
+            return validMoves;
+        }
+
+        int stepY = (currentPlayer == Player.PLAYER1) ? 1 : -1;
+        int[] stepXs = { -1, 0, 1 };
+        for (int stepX : stepXs) {
+            collectMovesInDirection(board.getGrid(), fromSquare, stepX, stepY, validMoves);
+        }
+        return validMoves;
+    }
+
+    /**
+     * Walks along a single ray from {@code fromSquare} and collects unoccupied
+     * destination squares.
+     */
+    private void collectMovesInDirection(Square[][] grid, Square fromSquare, int stepX, int stepY,
+            List<Square> validMoves) {
+        int x = fromSquare.getCoordinates().getX() + stepX;
+        int y = fromSquare.getCoordinates().getY() + stepY;
+        while (!isSquareBlocked(grid, x, y)) {
+            validMoves.add(grid[y][x]);
+            x += stepX;
+            y += stepY;
+        }
     }
 
     /**
@@ -106,10 +189,10 @@ public class Game {
         while (moving != toSquare) {
             int newX = moving.getCoordinates().getX() + stepX;
             int newY = moving.getCoordinates().getY() + stepY;
-            if (grid[newX][newY].isOccupied()) {
+            if (grid[newY][newX].isOccupied()) {
                 return false;
             }
-            moving = grid[newX][newY];
+            moving = grid[newY][newX];
         }
         return true;
     }
@@ -130,10 +213,12 @@ public class Game {
 
         if (checkedPieces.contains(currentPiece)) {
             if (lastMovedPlayer != null) {
-                Player winner = (lastMovedPlayer == Player.PLAYER1) ? Player.PLAYER2 : Player.PLAYER1;
-                winner.setWinner(true);
+                Player deadlockWinner = (lastMovedPlayer == Player.PLAYER1) ? Player.PLAYER2 : Player.PLAYER1;
+                endGame(deadlockWinner);
+            } else {
+                endGame(null);
             }
-            throw new IllegalArgumentException("VÉGE A JÁTÉKNAK!");
+            return null;
         }
         checkedPieces.add(currentPiece);
 
@@ -151,10 +236,10 @@ public class Game {
      */
     private Square findPieceSquare(Board board, Player player, Color pieceColor) {
         Square[][] grid = board.getGrid();
-        for (int i = 0; i < 8; i++) {
-            for (int j = 0; j < 8; j++) {
-                if (isMatchingPieceOnSquare(grid[i][j], player, pieceColor)) {
-                    return grid[i][j];
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                if (isMatchingPieceOnSquare(grid[y][x], player, pieceColor)) {
+                    return grid[y][x];
                 }
             }
         }
@@ -171,7 +256,10 @@ public class Game {
                 && square.getPiece().getColor() == pieceColor;
     }
 
-    /** Checks whether all three forward squares are blocked. */
+    /**
+     * Checks whether all three forward squares (diagonal-left, straight,
+     * diagonal-right) are blocked.
+     */
     private boolean isPieceBlocked(Board board, Square pieceSquare, Player player) {
         Square[][] grid = board.getGrid();
         int x = pieceSquare.getCoordinates().getX();
@@ -186,11 +274,19 @@ public class Game {
     /** Checks whether {@code (x, y)} is out of board bounds or already occupied. */
     private boolean isSquareBlocked(Square[][] grid, int x, int y) {
         boolean outOfBounds = (x < 0 || x >= 8 || y < 0 || y >= 8);
-        return outOfBounds || grid[x][y].isOccupied();
+        return outOfBounds || grid[y][x].isOccupied();
     }
 
     public void switchPlayer(Player player) {
         currentPlayer = (player == Player.PLAYER1) ? Player.PLAYER2 : Player.PLAYER1;
+    }
+
+    public Player getCurrentPlayer() {
+        return currentPlayer;
+    }
+
+    public Color getNextMoveColor() {
+        return nextMoveColor;
     }
 
     public boolean isFirstMove() {
@@ -203,6 +299,14 @@ public class Game {
 
     public Player getLastMovedPlayer() {
         return lastMovedPlayer;
+    }
+
+    public boolean isGameOver() {
+        return gameOver;
+    }
+
+    public Player getWinner() {
+        return winner;
     }
 
 }

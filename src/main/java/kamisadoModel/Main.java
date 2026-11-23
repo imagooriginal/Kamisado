@@ -1,9 +1,11 @@
 package kamisadoModel;
 
+import javax.swing.SwingUtilities;
+import kamisadoView.KamisadoFrame;
+
 public class Main {
 
     public static void main(String[] args) {
-
-        // You can add code here to interact with the board or test its functionality
+        SwingUtilities.invokeLater(() -> new KamisadoFrame().setVisible(true));
     }
 }
